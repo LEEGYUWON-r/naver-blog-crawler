@@ -182,6 +182,13 @@ def browser_check(x_access_key: str | None = Header(default=None)):
         raise HTTPException(503, f"Chromium 진단 실패: {type(ex).__name__}: {str(ex)[:160]}")
 
 
+@app.get("/api/auth-check")
+def auth_check(x_access_key: str | None = Header(default=None)):
+    """Validate the access code without starting Chromium or a crawl."""
+    authorize(x_access_key)
+    return {"ok": True}
+
+
 @app.post("/api/jobs", status_code=202)
 def create_job(payload: JobRequest, x_access_key: str | None = Header(default=None)):
     authorize(x_access_key)

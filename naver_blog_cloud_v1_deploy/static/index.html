@@ -13,7 +13,7 @@
     <aside class="sidebar">
       <div class="brand"><span class="brand-mark">◈</span><div><strong>INSIGHT LAB</strong><small>블로그 분석 도구</small></div></div>
       <div class="nav-label">WORKSPACE</div>
-      <a href="/" class="nav-item selected"><span>⌕</span> 블로그 수집 <span class="nav-pill">V1</span></a>
+      <a href="/" class="nav-item selected"><span>⌕</span> 블로그 수집 <span class="nav-pill">V1.1</span></a>
       <div class="sidebar-bottom"><span class="signal-dot"></span> 네이버 검색 API 미사용<br><small>실제 검색화면 기반 수집</small></div>
     </aside>
     <main class="main">
@@ -35,7 +35,13 @@
               <div class="field"><label for="pause">스크롤 간 대기</label><select id="pause"><option value="1">1초</option><option value="1.5" selected>1.5초</option><option value="2">2초</option><option value="3">3초</option><option value="5">5초</option></select></div>
               <div class="check-field"><label><input type="checkbox" id="lookupNames" checked> <span>블로그명 누락 시 공개 블로그 화면 추가 확인<small>수집 시간이 조금 더 걸릴 수 있어요.</small></span></label></div>
               <div class="check-field"><label><input type="checkbox" id="screenshots"> <span>검색 첫 화면 스크린샷 저장</span></label></div>
-              <div class="field access-field"><label for="accessKey">사이트 접근코드 <span class="optional">(관리자가 설정한 경우)</span></label><input type="password" id="accessKey" placeholder="접근코드 입력" autocomplete="off"><small class="field-help">접근코드는 이 탭에서만 보관하며 엑셀에는 저장하지 않습니다.</small></div>
+              <div class="field access-field">
+                <label for="accessKey">사이트 접근코드</label>
+                <input type="password" id="accessKey" placeholder="접근코드 입력" autocomplete="off">
+                <div class="check-field remember-access"><label><input type="checkbox" id="rememberAccessKey"> <span>이 기기에서 접근코드 기억하기<small>개인 PC에서만 체크하세요. 브라우저에 코드가 저장됩니다.</small></span></label></div>
+                <div class="access-actions"><button type="button" id="verifyKeyBtn" class="verify-key-btn">코드 확인 및 저장</button><button type="button" id="forgetKeyBtn" class="forget-key-btn">저장된 코드 삭제</button></div>
+                <small class="field-help" id="accessStatus" role="status" aria-live="polite">저장을 선택하지 않으면 브라우저를 닫거나 새로고침할 때 코드를 다시 입력해야 해요.</small>
+              </div>
               <button class="primary-btn" id="startBtn" type="submit"><span>▶</span> 크롤링 시작</button>
               <button type="button" class="stop-btn" id="stopBtn" disabled>■ &nbsp; 수집 중지</button>
             </form>

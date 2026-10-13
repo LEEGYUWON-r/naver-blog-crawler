@@ -45,6 +45,9 @@ def test_end_to_end_http_mock_crawl(tmp_path):
     client = TestClient(mod.app)
     hdr={'X-Access-Key':'test-secret'}
     assert client.get('/health').status_code == 200
+    assert client.get('/api/auth-check').status_code == 401
+    assert client.get('/api/auth-check',headers={'X-Access-Key':'wrong-code'}).status_code == 401
+    assert client.get('/api/auth-check',headers=hdr).json() == {'ok':True}
     assert client.get('/').status_code == 200
     assert client.post('/api/jobs', json={'keywords':'아기첫과일'}).status_code == 401
     assert client.post('/api/jobs',json={'keywords':'\n'.join(str(i) for i in range(9))},headers=hdr).status_code == 422
