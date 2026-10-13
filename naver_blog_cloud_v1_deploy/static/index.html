@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#eff3f8">
+  <title>네이버 블로그 수집 관리</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script defer src="/static/app.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">◈</span><div><strong>INSIGHT LAB</strong><small>블로그 분석 도구</small></div></div>
+      <div class="nav-label">WORKSPACE</div>
+      <a href="/" class="nav-item selected"><span>⌕</span> 블로그 수집 <span class="nav-pill">V1</span></a>
+      <div class="sidebar-bottom"><span class="signal-dot"></span> 네이버 검색 API 미사용<br><small>실제 검색화면 기반 수집</small></div>
+    </aside>
+    <main class="main">
+      <div class="topbar"><div class="crumb">분석 도구 <span>/</span> 블로그 검색화면 수집</div><div class="top-right"><span class="live-dot"></span> 브라우저 수집 방식 <span class="top-chip">CLOUD</span></div></div>
+      <div class="content">
+        <div class="page-intro"><div class="eyebrow">NAVER BLOG RESEARCH</div><h1>블로그 검색화면 수집 <span class="heading-emoji">🔎</span></h1><p>네이버 검색화면에 표시되는 블로그 게시글을 직접 읽고, 결과를 엑셀로 정리합니다.</p></div>
+        <section class="stats">
+          <div class="stat"><div class="stat-icon blue">⌕</div><div><small>검색 키워드</small><strong id="statKeywords">0<span>개</span></strong></div></div>
+          <div class="stat"><div class="stat-icon violet">▤</div><div><small>수집 게시글</small><strong id="statCount">0<span>건</span></strong></div></div>
+          <div class="stat"><div class="stat-icon amber">◷</div><div><small>진행 상태</small><strong class="text-status" id="statStatus">대기 중</strong></div></div>
+        </section>
+        <div class="layout">
+          <section class="panel settings">
+            <div class="panel-heading"><div class="panel-heading-left"><div class="panel-icon">⚙</div><div><h2>수집 설정</h2><p>키워드와 검색 조건을 입력해주세요.</p></div></div><span class="step-badge">STEP 01</span></div>
+            <form id="crawlForm" autocomplete="off">
+              <div class="field"><div class="field-label"><label for="keywords">검색 키워드 <em>*</em></label><small>최대 8개</small></div><textarea id="keywords" rows="5" maxlength="650" placeholder="한 줄에 하나씩 입력해주세요.&#10;예: 아기첫과일&#10;아넬라 퓨레" required>아기첫과일</textarea><div class="field-help">줄바꿈 또는 쉼표로 구분해서 입력할 수 있어요.</div></div>
+              <div class="field"><label>조회 환경</label><div class="device-toggle"><label><input type="radio" name="device" value="mobile" checked><span>▯ &nbsp; 모바일 웹</span></label><label><input type="radio" name="device" value="desktop"><span>▣ &nbsp; PC 웹</span></label></div></div>
+              <div class="field-grid"><div class="field"><label for="limit">키워드별 수집 건수</label><select id="limit"><option value="10">10건</option><option value="20" selected>20건</option><option value="50">50건</option><option value="100">100건</option></select></div><div class="field"><label for="scrolls">최대 스크롤 횟수</label><select id="scrolls"><option value="5">5회</option><option value="10">10회</option><option value="15" selected>15회</option><option value="25">25회</option><option value="35">35회</option></select></div></div>
+              <div class="field"><label for="pause">스크롤 간 대기</label><select id="pause"><option value="1">1초</option><option value="1.5" selected>1.5초</option><option value="2">2초</option><option value="3">3초</option><option value="5">5초</option></select></div>
+              <div class="check-field"><label><input type="checkbox" id="lookupNames" checked> <span>블로그명 누락 시 공개 블로그 화면 추가 확인<small>수집 시간이 조금 더 걸릴 수 있어요.</small></span></label></div>
+              <div class="check-field"><label><input type="checkbox" id="screenshots"> <span>검색 첫 화면 스크린샷 저장</span></label></div>
+              <div class="field access-field"><label for="accessKey">사이트 접근코드 <span class="optional">(관리자가 설정한 경우)</span></label><input type="password" id="accessKey" placeholder="접근코드 입력" autocomplete="off"><small class="field-help">접근코드는 이 탭에서만 보관하며 엑셀에는 저장하지 않습니다.</small></div>
+              <button class="primary-btn" id="startBtn" type="submit"><span>▶</span> 크롤링 시작</button>
+              <button type="button" class="stop-btn" id="stopBtn" disabled>■ &nbsp; 수집 중지</button>
+            </form>
+          </section>
+          <section class="panel result-panel">
+            <div class="panel-heading"><div class="panel-heading-left"><div class="panel-icon green">▤</div><div><h2>수집 결과</h2><p>수집이 완료되면 이곳에서 확인할 수 있어요.</p></div></div><div id="statusBadge" class="status-badge idle"><span></span> 준비 완료</div></div>
+            <div class="job-summary" id="jobSummary" hidden><div><strong id="jobStatusText">수집 중</strong><span id="jobMessage">브라우저 실행 준비 중</span></div><div class="job-time" id="jobTime">-</div></div>
+            <div class="table-tools"><div class="table-title">게시글 목록 <span id="rowCount" class="row-count">0</span></div><button id="downloadBtn" class="download-btn" disabled>↓ &nbsp; 엑셀 다운로드</button></div>
+            <div id="emptyState" class="empty"><div class="empty-img"><span>⌕</span></div><strong>아직 수집된 데이터가 없어요</strong><p>왼쪽에서 키워드를 입력하고<br>크롤링 시작 버튼을 눌러주세요.</p></div>
+            <div id="resultsWrapper" class="results-wrapper" hidden><div class="table-scroll"><table><thead><tr><th>순번</th><th>검색 키워드</th><th>게시글 제목</th><th>블로그명</th><th>게시일</th><th>게시글 URL</th></tr></thead><tbody id="resultsBody"></tbody></table></div></div>
+            <div class="panel-bottom"><span>ⓘ &nbsp;수집 순서는 블로그 게시글 기준이며 전체 검색 절대 순위가 아닙니다.</span></div>
+          </section>
+        </div>
+        <section class="logs-panel"><div class="logs-header"><div><span class="terminal-icon">›_</span> <strong>실행 기록</strong> <span class="logs-subtitle">실시간 작업 현황</span></div><button id="toggleLog" class="link-btn">접기</button></div><pre id="logs">키워드를 입력한 뒤 크롤링 시작 버튼을 눌러주세요.</pre></section>
+        <footer><span>실제 Chromium 브라우저 화면 기반 수집 · 네이버 공식 API 미사용</span><span>검색화면 구성, 서버 접속 제한, 개인화 등에 따라 결과가 달라질 수 있습니다.</span></footer>
+      </div>
+    </main>
+  </div>
+</body>
+</html>
