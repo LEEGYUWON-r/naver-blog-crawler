@@ -113,19 +113,85 @@ def snapshot(page, extract_js: str) -> list[dict]:
     return data
 
 
-def try_more(page, log) -> bool:
-    """화면 아래 '더보기'나 페이지 넘김이 명확할 때만 클릭."""
-    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-    for selector in ["a.btn_next", 'a[aria-label="다음페이지"]', 'a[aria-label="다음 페이지"]']:
+def _visible_post_ids(page, js: str) -> tuple[str, ...]:
+    """Read only rendered post links (never internal search responses)."""
+    return tuple(r.get("canonical", "") for r in snapshot(page, js) if r.get("canonical"))
+
+
+def try_more(page, log, js: str) -> bool:
+    """Follow an explicit, visible next/more control on the current search page.
+
+    Never synthesize a page URL or call hidden search APIs. Only accept a click
+    when the rendered results or the browser URL change. This avoids mistaking
+    an unrelated 'more' button for a new search-results page.
+    """
+    root = page.locator("#main_pack, #content, main, [role='main']").first
+    if not root.count():
+        root = page.locator("body")
+    selectors = [
+        'a.btn_next', 'button.btn_next', 'a.btn_more', 'button.btn_more',
+        'a[aria-label="다음 페이지"]', 'button[aria-label="다음 페이지"]',
+        'a[aria-label="다음페이지"]', 'button[aria-label="다음페이지"]',
+        '[class*="pagination"] a[class*="next"]',
+        '[class*="paginate"] a[class*="next"]',
+        '[class*="paging"] a[class*="next"]',
+        '[class*="pagination"] button[class*="next"]',
+        '[class*="more_area"] a', '[class*="more_area"] button',
+        '[class*="more_wrap"] a', '[class*="more_wrap"] button',
+        'button', 'a',
+    ]
+    old_url = page.url
+    old_ids = _visible_post_ids(page, js)
+    examined = set()
+    for sel in selectors:
+        candidates = root.locator(sel)
         try:
-            node = page.locator(selector).first
-            if node.count() and node.is_visible(timeout=350) and node.is_enabled():
-                node.click(timeout=2500)
-                page.wait_for_timeout(1200)
-                log("다음 결과 페이지로 이동했습니다.")
-                return True
+            n = min(candidates.count(), 250)
         except Exception:
             continue
+        for i in range(n):
+            item = candidates.nth(i)
+            try:
+                if not item.is_visible(timeout=250) or not item.is_enabled():
+                    continue
+                # Stable DOM marker prevents double-clicking the same control.
+                handle = item.element_handle(timeout=450)
+                if handle is None or str(handle) in examined:
+                    continue
+                examined.add(str(handle))
+                info = item.evaluate("""(el) => ({
+                  text: (el.innerText || el.textContent || '').replace(/\s+/g,' ').trim(),
+                  label: (el.getAttribute('aria-label') || '').trim(),
+                  cls: (typeof el.className === 'string' ? el.className : ''),
+                  parent: (el.parentElement?.className || '').toString(),
+                  href: el.getAttribute('href') || '',
+                  nav: !!el.closest('nav, [role="navigation"], [class*="pagination"], [class*="paginate"], [class*="paging"]'),
+                  tag: el.tagName.toLowerCase()
+                })""")
+                name = info['label'] or info['text']
+                cls = (info['cls'] + ' ' + info['parent']).lower()
+                is_next = name in {'다음', '다음 페이지', '다음페이지', '다음 10개', '다음 검색결과'}
+                is_more = name in {'더보기', '결과 더보기', '검색결과 더보기', '블로그 더보기', '더 보기'}
+                likely_control = (('next' in cls or 'paging' in cls or 'paginate' in cls) and is_next) or (('more' in cls) and is_more)
+                if not (likely_control or (info['nav'] and is_next) or (info['tag'] == 'button' and is_more)):
+                    continue
+                if info['href'].lower().startswith(('javascript:', 'data:')):
+                    continue
+                item.click(timeout=3000)
+                for _ in range(3):
+                    page.wait_for_timeout(900)
+                    if not is_naver_search(page.url):
+                        raise CrawlError('결과 더보기 후 네이버 검색 페이지를 벗어났습니다.')
+                    new_ids = _visible_post_ids(page, js)
+                    if (page.url != old_url and new_ids) or any(post not in old_ids for post in new_ids):
+                        log(f"실제 화면의 '{name}' 버튼으로 다음 검색 결과를 불러왔습니다.")
+                        return True
+                log(f"'{name}' 버튼을 눌렀지만 추가 게시글이 나타나지 않았습니다.")
+                return False
+            except CrawlError:
+                raise
+            except Exception:
+                continue
     return False
 
 
@@ -145,11 +211,16 @@ def capture_debug(page, debug_dir: Path, keyword: str, label: str, log) -> str:
 def crawl_keyword(page, keyword: str, device: str, limit: int, max_scrolls: int,
                   pause: float, stop: threading.Event, log, debug_dir: Path,
                   save_screenshots: bool = False) -> tuple[list[dict], dict]:
-    """실제 검색화면의 렌더링된 블로그 글 링크를 표시 순서대로 수집."""
+    """Collect genuinely rendered Naver blog items, in their first-seen order.
+
+    The request count is a ceiling, not a promise of availability. If the site
+    reveals fewer results, return the observed count with an explicit reason.
+    """
     page.goto(search_url(keyword, device), wait_until="domcontentloaded", timeout=35000)
     check_block(page)
     if stop.is_set():
-        return [], {"keyword": keyword, "count": 0, "status": "중지", "url": page.url, "mode": ""}
+        return [], {"keyword": keyword, "count": 0, "status": "중지", "url": page.url,
+                    "mode": "", "reason": "사용자 중지", "pages": 0}
     method = goto_blog_tab(page, device, keyword, log)
     check_block(page)
     if save_screenshots:
@@ -157,37 +228,50 @@ def crawl_keyword(page, keyword: str, device: str, limit: int, max_scrolls: int,
     js = JS_FILE.read_text(encoding="utf-8")
     found: dict[str, dict] = {}
     stagnant = 0
+    page_moves = 0
+    reason = "최대 스크롤 횟수에 도달했습니다."
     for index in range(max_scrolls + 1):
         if stop.is_set():
+            reason = "사용자 중지"
             break
         check_block(page)
         old_size = len(found)
-        visible_results = snapshot(page, js)
-        for rec in visible_results:
+        for rec in snapshot(page, js):
             if rec.get("canonical") and rec["canonical"] not in found:
                 found[rec["canonical"]] = rec
-        log(f"'{keyword}' 화면 확인 {index + 1}/{max_scrolls + 1}, 고유 게시글 {len(found)}건")
+        log(f"'{keyword}' 화면 확인 {index + 1}/{max_scrolls + 1}, 고유 게시글 {len(found)}/{limit}건, 페이지 이동 {page_moves}회")
         if len(found) >= limit:
+            reason = "설정한 수집 건수에 도달했습니다."
             break
-        if len(found) == old_size:
-            stagnant += 1
-        else:
-            stagnant = 0
+        stagnant = stagnant + 1 if len(found) == old_size else 0
         if index >= max_scrolls:
             break
-        if stagnant >= 3:
-            if try_more(page, log):
+        at_bottom = page.evaluate("""() =>
+            window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 100""")
+        if stagnant >= 2 and at_bottom:
+            if try_more(page, log, js):
+                page_moves += 1
                 stagnant = 0
-            else:
-                log("추가 게시글이 나타나지 않아 현재 결과까지만 수집합니다.")
-                break
+                if stop.wait(max(1.0, pause)):
+                    reason = "사용자 중지"
+                    break
+                continue
+            reason = "화면 하단에서 추가 게시글 또는 다음 페이지를 찾지 못했습니다."
+            log(f"'{keyword}' 검색화면 결과 소진: {len(found)}/{limit}건, 다음 페이지를 확인하지 못함")
+            break
+        if stagnant >= 4:
+            page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
+            log("새 게시글이 없어 검색결과 맨 아래까지 이동해 다시 확인합니다.")
         else:
-            page.evaluate("window.scrollBy(0, Math.max(620, Math.floor(window.innerHeight*0.85)))")
+            page.evaluate("window.scrollBy(0, Math.max(650, Math.floor(window.innerHeight * 0.90)))")
         if stop.wait(pause):
+            reason = "사용자 중지"
             break
     if not found and not stop.is_set():
         capture_debug(page, debug_dir, keyword, "수집실패", log)
         raise CrawlError("게시글 링크를 읽지 못했습니다. 네이버 페이지 구조 변경, 검색 결과 없음 또는 접근 제한 가능성이 있습니다. 오류 화면을 확인해주세요.")
+    if len(found) < limit and save_screenshots:
+        capture_debug(page, debug_dir, keyword, "종료화면", log)
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     rows = []
     for pos, rec in enumerate(list(found.values())[:limit], start=1):
@@ -200,8 +284,10 @@ def crawl_keyword(page, keyword: str, device: str, limit: int, max_scrolls: int,
             "광고 표기": rec.get("isAd", ""), "조회 환경": "모바일 웹 재현" if device == "mobile" else "데스크톱 브라우저",
             "검색 페이지 주소": page.url, "조회 시각": timestamp,
         })
-    summary = {"keyword": keyword, "count": len(rows), "status": "정상" if rows and not stop.is_set() else "일부 수집/중지",
-               "url": page.url, "mode": method}
+    log(f"'{keyword}' 수집 종료: {len(rows)}/{limit}건, 페이지 이동 {page_moves}회. 종료 사유: {reason}")
+    summary = {"keyword": keyword, "count": len(rows),
+               "status": "중지" if stop.is_set() else "정상" if len(rows) >= limit else "화면에서 추가 결과 미발견",
+               "url": page.url, "mode": method, "reason": reason, "pages": page_moves}
     return rows, summary
 
 
@@ -243,10 +329,10 @@ def save_excel(dest: Path, records: list[dict], reports: list[dict], config: dic
                 c.font = Font(name="맑은 고딕", size=10, color="1565C0", underline="single")
 
     summary = wb.create_sheet("키워드별 현황")
-    summary.append(["검색 키워드", "수집 게시글 수", "수집 상태", "실제 조회된 화면 주소", "탭 선택 방식", "오류 내용"])
+    summary.append(["검색 키워드", "수집 게시글 수", "수집 상태", "실제 조회된 화면 주소", "탭 선택 방식", "오류 내용", "종료 사유", "페이지 이동 횟수"])
     for row in reports:
-        summary.append([safe_excel(row.get(k, "")) for k in ("keyword", "count", "status", "url", "mode", "error")])
-    style(summary, [27, 20, 22, 75, 46, 90])
+        summary.append([safe_excel(row.get(k, "")) for k in ("keyword", "count", "status", "url", "mode", "error", "reason", "pages")])
+    style(summary, [27, 20, 25, 75, 46, 60, 90, 20])
 
     note = wb.create_sheet("수집 기준 안내")
     note.append(["항목", "설명"])
@@ -263,6 +349,7 @@ def save_excel(dest: Path, records: list[dict], reports: list[dict], config: dic
         ("정렬", "검색화면의 기본 정렬을 사용합니다. 프로그램은 API 정렬 파라미터를 사용하지 않습니다."),
         ("접근 제한", "자동입력 방지 화면, 접근 제한이 나타나면 우회하지 않습니다. 반복 대량 실행을 피하고 서비스 정책을 확인하세요."),
         ("수집 설정", f"검색 모드: {config['device']} / 키워드별 상한: {config['limit']} / 최대 스크롤: {config['scrolls']} / 스크롤 대기: {config['pause']}초"),
+        ("설정 건수와 실제 수집", "설정한 100/200/300건은 최대 수집 건수이지 보장된 네이버 검색 결과 수가 아닙니다. 페이지에서 확인된 게시글만 수집하며 중단된 이유는 키워드별 현황에 기록합니다."),
         ("생성 시각", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
     ]
     for a, b in details:

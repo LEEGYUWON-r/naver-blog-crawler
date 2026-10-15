@@ -100,7 +100,6 @@ function setRunning(running){$('startBtn').disabled=running;$('stopBtn').disable
 function renderRows(rows){
   const r = rows || [];
   $('rowCount').textContent = r.length;
-  $('statCount').innerHTML = `${r.length}<span>건</span>`;
   $('emptyState').hidden = !!r.length;
   $('resultsWrapper').hidden = !r.length;
   $('resultsBody').innerHTML = r.map(row=>{

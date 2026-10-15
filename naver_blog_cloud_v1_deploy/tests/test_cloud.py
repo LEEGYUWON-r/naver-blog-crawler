@@ -98,3 +98,67 @@ def test_failure_workbook_no_false_success(tmp_path):
         assert state['status']=='오류'
         assert state['downloadReady']
         assert state['count']==0
+
+
+def test_v12_larger_page_navigation_with_rendered_html(tmp_path):
+    """A 30-post page with a real clickable 'next' control yields 95 posts."""
+    from unittest.mock import patch
+    import threading
+    from screen_crawler import crawl_keyword, save_excel
+
+    fixture = '''<!doctype html><html><body>
+      <main id="main_pack"><div id="posts"></div>
+      <nav class="paginate"><button class="btn_next" id="nextPage">다음 페이지</button></nav></main>
+      <script>
+      let index = 0; const total = 95; const perPage = 30;
+      function draw() {
+        const container = document.querySelector('#posts');
+        container.innerHTML = '';
+        for (let k = index*perPage+1; k <= Math.min(total,(index+1)*perPage);k++){
+          const el=document.createElement('article');el.className='result_item';
+          el.innerHTML='<a class="title_link" href="https://m.blog.naver.com/fruitmom/'+(1000000000+k)+'">아기 첫과일 후기 '+k+'</a><a href="https://m.blog.naver.com/fruitmom">과일맘</a>';
+          container.appendChild(el);
+        }
+        const more=(index+1)*perPage<total;
+        document.getElementById('nextPage').style.display=more?'block':'none';
+      }
+      document.getElementById('nextPage').addEventListener('click',()=>{index++;draw();window.scrollTo(0,0);});
+      draw();
+      </script></body></html>'''
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True,executable_path='/usr/bin/chromium',args=['--no-sandbox'])
+        context=browser.new_context(viewport={'width':380,'height':750})
+        page=context.new_page()
+        htmlfile = tmp_path / 'fixture.html'
+        htmlfile.write_text(fixture, encoding='utf-8')
+        try:
+            with patch('screen_crawler.goto_blog_tab',lambda page,device,kw,log:'테스트 블로그 탭'), \
+                 patch('screen_crawler.search_url',lambda keyword,device:htmlfile.as_uri()), \
+                 patch('screen_crawler.is_naver_search',lambda url:True), \
+                 patch.object(page, 'goto', side_effect=lambda *args,**kwargs:page.set_content(fixture)):
+                log=[]
+                rows,summary=crawl_keyword(page,'아기첫과일','mobile',100,25,0.01,threading.Event(),log.append,tmp_path)
+            assert len(rows)==95, (len(rows),log)
+            assert summary['pages']==3,summary
+            assert summary['status']=='화면에서 추가 결과 미발견',summary
+            assert '다음 페이지' in '\n'.join(log)
+            assert [row['화면 수집 순번'] for row in rows]==list(range(1,96))
+            assert rows[94]['게시글 제목']=='아기 첫과일 후기 95'
+            assert '추가' in summary['reason']
+            save_excel(tmp_path/'result.xlsx',rows,[summary],{'device':'mobile','limit':100,'scrolls':25,'pause':1.0})
+            from openpyxl import load_workbook
+            wb=load_workbook(tmp_path/'result.xlsx',read_only=True)
+            headers=[c.value for c in wb['키워드별 현황'][1]]
+            assert '종료 사유' in headers and '페이지 이동 횟수' in headers
+            wb.close()
+        finally:
+            context.close();browser.close()
+
+
+def test_v12_new_upper_bounds():
+    from app import JobRequest
+    assert JobRequest(keywords='아기첫과일',limit=300,scrolls=80).limit==300
+    import pytest
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError): JobRequest(keywords='아기첫과일',limit=301)
+    with pytest.raises(ValidationError): JobRequest(keywords='아기첫과일',scrolls=81)

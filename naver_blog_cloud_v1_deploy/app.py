@@ -41,8 +41,8 @@ app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 class JobRequest(BaseModel):
     keywords: str = Field(min_length=1, max_length=650)
     device: str = "mobile"
-    limit: int = Field(default=20, ge=1, le=100)
-    scrolls: int = Field(default=15, ge=0, le=35)
+    limit: int = Field(default=20, ge=1, le=300)
+    scrolls: int = Field(default=15, ge=0, le=80)
     pause: float = Field(default=1.5, ge=1.0, le=15.0)
     lookup_missing_names: bool = True
     screenshots: bool = False
@@ -120,7 +120,7 @@ def run_job(jobid: str, cfg: dict):
                 wb.close()
         with LOCK:
             job["count"] = count
-            job["rows"] = items[:800]
+            job["rows"] = items[:2400]
             job["errors"] = errors
             job["screenshots"] = [p.name for p in debug_dir.glob("*.png")][:15] if debug_dir and debug_dir.exists() else []
             # 키워드 일부에서 오류가 나면 완료로 위장하지 않고 일부 실패를 명시
